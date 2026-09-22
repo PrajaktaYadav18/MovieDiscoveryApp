@@ -1,12 +1,20 @@
+
 import axios from "axios";
 
+// =========================
+// BACKEND API URL
+// =========================
+
+const BASE_URL =
+    import.meta.env.VITE_API_URL ||
+    "http://localhost:5000";
 
 // =========================
 // MOVIE API
 // =========================
 
 const API = axios.create({
-    baseURL: "http://localhost:5000/api/movies",
+    baseURL: `${BASE_URL}/api/movies`,
     timeout: 30000
 });
 
@@ -89,7 +97,7 @@ export const getMoviesByGenre = async (
 // =========================
 
 const WISHLIST_API = axios.create({
-    baseURL: "http://localhost:5000/api/wishlist",
+    baseURL: `${BASE_URL}/api/wishlist`,
     timeout: 30000
 });
 
@@ -131,3 +139,4 @@ export const removeFromWishlist = async (movieId) => {
 
     return response.data;
 };
+
