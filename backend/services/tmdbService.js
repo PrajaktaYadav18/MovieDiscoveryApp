@@ -1,4 +1,4 @@
-const { execFile } = require("child_process");
+const axios = require("axios");
 
 // ===============================
 // Simple In-Memory Cache
@@ -10,271 +10,277 @@ const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 const MAX_CACHE_ITEMS = 100;
 
 const sleep = (ms) =>
-    new Promise((resolve) => setTimeout(resolve, ms));
-
+new Promise((resolve) => setTimeout(resolve, ms));
 
 // ===============================
 // Cache Helpers
 // ===============================
 
 const getCacheKey = (path, params) => {
-    const query = new URLSearchParams(params).toString();
+const query = new URLSearchParams(params).toString();
 
-    return `${path}?${query}`;
+return `${path}?${query}`;
+
+
 };
 
 const getCachedData = (key) => {
-    const cached = cache.get(key);
+const cached = cache.get(key);
 
-    if (!cached) {
-        return null;
-    }
 
-    const isExpired =
-        Date.now() - cached.timestamp > CACHE_DURATION;
+if (!cached) {
+    return null;
+}
 
-    if (isExpired) {
-        cache.delete(key);
-        return null;
-    }
+const isExpired =
+    Date.now() - cached.timestamp > CACHE_DURATION;
 
-    return cached.data;
+if (isExpired) {
+    cache.delete(key);
+    return null;
+}
+
+return cached.data;
+
+
 };
 
 const setCachedData = (key, data) => {
-    // Prevent unlimited memory usage
-    if (cache.size >= MAX_CACHE_ITEMS) {
-        const firstKey = cache.keys().next().value;
 
-        if (firstKey) {
-            cache.delete(firstKey);
-        }
+
+// Prevent unlimited memory usage
+if (cache.size >= MAX_CACHE_ITEMS) {
+
+    const firstKey =
+        cache.keys().next().value;
+
+    if (firstKey) {
+        cache.delete(firstKey);
     }
+}
 
-    cache.set(key, {
-        data,
-        timestamp: Date.now(),
-    });
+cache.set(key, {
+    data,
+    timestamp: Date.now(),
+});
+
+
 };
-
 
 // ===============================
 // TMDB Request
 // ===============================
 
-const tmdbRequest = async (path, params = {}) => {
-    const cacheKey = getCacheKey(path, params);
+const tmdbRequest = async (
+path,
+params = {}
+) => {
 
-    // Check cache first
-    const cachedData = getCachedData(cacheKey);
 
-    if (cachedData) {
-        console.log("TMDB Cache HIT:", cacheKey);
-        return cachedData;
-    }
+const cacheKey =
+    getCacheKey(path, params);
 
-    console.log("TMDB Cache MISS:", cacheKey);
+// Check cache first
+const cachedData =
+    getCachedData(cacheKey);
 
-    const query = new URLSearchParams(params).toString();
+if (cachedData) {
 
-    const url =
-        `${process.env.TMDB_BASE_URL}${path}?${query}`;
+    console.log(
+        "TMDB Cache HIT:",
+        cacheKey
+    );
 
-    console.log("TMDB Request:", url);
+    return cachedData;
+}
 
-    let lastError;
+console.log(
+    "TMDB Cache MISS:",
+    cacheKey
+);
 
-    for (let attempt = 1; attempt <= 3; attempt++) {
-        try {
-            const result = await new Promise(
-                (resolve, reject) => {
-                    execFile(
-                        "curl.exe",
-                        [
-                            "-4",
-                            "--http1.1",
-                            "--tlsv1.2",
-                            "--silent",
-                            "--show-error",
-                            "--fail",
-                            "--connect-timeout",
-                            "15",
-                            "--max-time",
-                            "30",
-                            url,
-                            "-H",
-                            `Authorization: Bearer ${process.env.TMDB_ACCESS_TOKEN}`,
-                            "-H",
-                            "accept: application/json",
-                        ],
-                        {
-                            windowsHide: true,
-                            maxBuffer: 10 * 1024 * 1024,
-                        },
-                        (
-                            error,
-                            stdout,
-                            stderr
-                        ) => {
-                            if (error) {
-                                return reject(
-                                    new Error(
-                                        stderr ||
-                                        error.message
-                                    )
-                                );
-                            }
+const url =
+    `${process.env.TMDB_BASE_URL}${path}`;
 
-                            try {
-                                const data =
-                                    JSON.parse(
-                                        stdout
-                                    );
+let lastError;
 
-                                resolve(data);
-                            } catch (
-                                parseError
-                            ) {
-                                reject(
-                                    new Error(
-                                        `Invalid TMDB response: ${parseError.message}`
-                                    )
-                                );
-                            }
-                        }
-                    );
+// Retry up to 3 times
+for (
+    let attempt = 1;
+    attempt <= 3;
+    attempt++
+) {
+
+    try {
+
+        const response =
+            await axios.get(
+                url,
+                {
+                    params,
+
+                    headers: {
+                        Authorization:
+                            `Bearer ${process.env.TMDB_ACCESS_TOKEN}`,
+
+                        accept:
+                            "application/json",
+                    },
+
+                    timeout: 30000,
                 }
             );
 
-            // Save successful response
-            // into cache
-            setCachedData(
-                cacheKey,
-                result
-            );
+        const result =
+            response.data;
 
-            console.log(
-                `TMDB Success on attempt ${attempt}`
-            );
+        // Save successful response
+        // into cache
+        setCachedData(
+            cacheKey,
+            result
+        );
 
-            return result;
+        console.log(
+            `TMDB Success on attempt ${attempt}`
+        );
 
-        } catch (error) {
-            lastError = error;
+        return result;
 
-            console.error(
-                `TMDB attempt ${attempt} failed:`,
-                error.message
-            );
+    } catch (error) {
 
-            if (attempt < 3) {
-                await sleep(1000);
-            }
+        lastError = error;
+
+        console.error(
+            `TMDB attempt ${attempt} failed:`,
+            error.response?.data ||
+            error.message
+        );
+
+        if (attempt < 3) {
+            await sleep(1000);
         }
     }
+}
 
-    throw lastError;
+throw lastError;
+
+
 };
-
 
 // ===============================
 // Popular Movies
 // ===============================
 
 const getPopularMovies = async (
-    page = 1,
-    sortBy = "popularity.desc"
+page = 1,
+sortBy = "popularity.desc"
 ) => {
-    return await tmdbRequest(
-        "/discover/movie",
-        {
-            language: "en-US",
-            sort_by: sortBy,
-            page,
-        }
-    );
-};
 
+
+return await tmdbRequest(
+    "/discover/movie",
+    {
+        language: "en-US",
+        sort_by: sortBy,
+        page,
+    }
+);
+
+
+};
 
 // ===============================
 // Search Movies
 // ===============================
 
 const searchMovies = async (
-    query,
-    page = 1
+query,
+page = 1
 ) => {
-    return await tmdbRequest(
-        "/search/movie",
-        {
-            query,
-            include_adult: "false",
-            language: "en-US",
-            page,
-        }
-    );
-};
 
+
+return await tmdbRequest(
+    "/search/movie",
+    {
+        query,
+        include_adult: "false",
+        language: "en-US",
+        page,
+    }
+);
+
+
+};
 
 // ===============================
 // Movie Details
 // ===============================
 
 const getMovieDetails = async (
-    movieId
+movieId
 ) => {
-    return await tmdbRequest(
-        `/movie/${movieId}`,
-        {
-            language: "en-US",
-        }
-    );
-};
 
+
+return await tmdbRequest(
+    `/movie/${movieId}`,
+    {
+        language: "en-US",
+    }
+);
+
+
+};
 
 // ===============================
 // Movie Genres
 // ===============================
 
 const getMovieGenres = async () => {
-    return await tmdbRequest(
-        "/genre/movie/list",
-        {
-            language: "en-US",
-        }
-    );
-};
 
+
+return await tmdbRequest(
+    "/genre/movie/list",
+    {
+        language: "en-US",
+    }
+);
+
+
+};
 
 // ===============================
 // Movies By Genre
 // ===============================
 
 const getMoviesByGenre = async (
-    genreId,
-    page = 1,
-    sortBy = "popularity.desc"
+genreId,
+page = 1,
+sortBy = "popularity.desc"
 ) => {
-    return await tmdbRequest(
-        "/discover/movie",
-        {
-            language: "en-US",
-            with_genres: genreId,
-            sort_by: sortBy,
-            page,
-        }
-    );
-};
 
+
+return await tmdbRequest(
+    "/discover/movie",
+    {
+        language: "en-US",
+        with_genres: genreId,
+        sort_by: sortBy,
+        page,
+    }
+);
+
+
+};
 
 // ===============================
 // Exports
 // ===============================
 
 module.exports = {
-    getPopularMovies,
-    searchMovies,
-    getMovieDetails,
-    getMovieGenres,
-    getMoviesByGenre,
+getPopularMovies,
+searchMovies,
+getMovieDetails,
+getMovieGenres,
+getMoviesByGenre,
 };
